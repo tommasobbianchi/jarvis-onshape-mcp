@@ -48,13 +48,24 @@ from .feature_apply import FeatureApplyResult, apply_feature_and_check
 from .fs_notices import extract_fs_body, fetch_body_notices, format_notices
 
 
-# Current FS language version. The SAME number must appear in the uploaded
-# source's `FeatureScript <N>;` prelude AND every `import(..., version : "<N>.0")`
-# statement. Bump this when Onshape ships a newer std library — or call
-# `discover_fs_version()` at runtime to pull the live value.
-# 2931 verified via peer e288nu7l's FS-frontier dogfood (threaded boss); 2909
-# was stale by 22 versions as of 2026-04-17.
+# FALLBACK ONLY. The live version is resolved at upload time by
+# `resolve_fs_version()` and stamped into the source by `retarget_fs_version()`,
+# so callers no longer maintain their prelude by hand.
+#
+# Measured 2026-07-13 (live std = 3008), so we stop guessing about this:
+#   - Onshape IS backwards compatible. A source pinned to 2931 or 2909 compiles
+#     fine. Version drift is NOT what produces an empty feature spec -- a
+#     SYNTAX error is. Do not misread one as the other; that mistake cost a
+#     long bisect once already.
+#   - There is still a floor: pinning 2500 compiles to nothing. And an old
+#     prelude keeps you on old std semantics and accumulating deprecations.
+# So retargeting is hygiene, not a bug fix: it keeps every recipe on the current
+# std library without anyone remembering to bump a number.
 DEFAULT_FS_VERSION = "2931"
+
+# Matches `FeatureScript 2931;` and `version : "2931.0"` / `version:"2931.0"`.
+_FS_PRELUDE_RE = re.compile(r"(FeatureScript\s+)(\d+)(\s*;)")
+_FS_IMPORT_RE = re.compile(r'(version\s*:\s*")(\d+)(\.\d+")')
 
 # Onshape's public standard library document. Latest version entry = current
 # FS library version. See `discover_fs_version()`.
@@ -69,6 +80,7 @@ class CustomFeatureManager:
 
     def __init__(self, client: OnshapeClient):
         self.client = client
+        self._fs_version: Optional[str] = None
 
     # ---- FS version discovery --------------------------------------------
 
@@ -98,6 +110,25 @@ class CustomFeatureManager:
         raise RuntimeError(
             f"could not parse FS version from std versions list: {versions!r}"
         )
+
+    async def resolve_fs_version(self) -> str:
+        """Live FS library version, cached for the life of this manager.
+
+        Wraps `discover_fs_version()` with a cache and a fallback, so it is
+        safe to call on every upload. Never raises: a failed lookup degrades
+        to DEFAULT_FS_VERSION rather than blocking the user's feature.
+        """
+        if self._fs_version is None:
+            try:
+                self._fs_version = await self.discover_fs_version()
+                logger.debug("resolved live FS version: {}", self._fs_version)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "FS version lookup failed ({}); falling back to {}",
+                    e, DEFAULT_FS_VERSION,
+                )
+                self._fs_version = DEFAULT_FS_VERSION
+        return self._fs_version
 
     # ---- Feature Studio element lifecycle ---------------------------------
 
@@ -254,6 +285,13 @@ class CustomFeatureManager:
         tool description shows the minimum boilerplate.
         """
         fs_name = fs_element_name or f"ClaudeFS_{feature_type}"
+
+        # Stamp the LIVE std-library version into the source. Whatever the
+        # caller pinned is treated as a hint, not a contract, so recipes stay on
+        # current std semantics without anyone maintaining a literal.
+        fs_version = await self.resolve_fs_version()
+        feature_script = retarget_fs_version(feature_script, fs_version)
+
         fs_eid = await self.create_feature_studio(
             document_id, workspace_id, fs_name
         )
@@ -263,16 +301,19 @@ class CustomFeatureManager:
 
         # Verify the FS compiled by polling /featurespecs. Onshape's compile
         # is synchronous with POST /contents, so one GET is enough — empty
-        # featureSpecs means the source didn't compile (likely stale FS
-        # prelude version or syntax error).
+        # featureSpecs means a SYNTAX error (the prelude was just retargeted,
+        # and old preludes compile fine anyway).
         specs = await self.get_featurespecs(document_id, workspace_id, fs_eid)
         feature_specs = specs.get("featureSpecs") or []
         if not feature_specs:
             raise RuntimeError(
                 f"Feature Studio {fs_eid} compiled to an empty feature spec. "
-                f"Likely causes: stale FeatureScript prelude version (try "
-                f"discover_fs_version() and confirm DEFAULT_FS_VERSION={DEFAULT_FS_VERSION!r} "
-                f"is current), or a syntax error. libraryVersion="
+                f"The source was retargeted to the live FS version "
+                f"({fs_version}), so this is a SYNTAX error, not version drift. "
+                f"Onshape surfaces no diagnostic here -- known parse traps: no "
+                f"if-EXPRESSION (`var x = if (c) a else b;`), no uninitialized "
+                f"declarations (`var x is T;`), and a Query parameter requires a "
+                f'"Filter" annotation. libraryVersion='
                 f"{specs.get('libraryVersion')!r}. Uploaded source preview: "
                 f"{feature_script[:200]!r}"
             )
@@ -345,6 +386,28 @@ class CustomFeatureManager:
 
 
 # ---- helpers ---------------------------------------------------------------
+
+
+def retarget_fs_version(source: str, version: str) -> str:
+    """Rewrite an FS source's prelude + std imports to `version`.
+
+    `FeatureScript 2931;` -> `FeatureScript <version>;`
+    `version : "2931.0"`  -> `version : "<version>.0"`
+
+    Onshape accepts older preludes (2909 and 2931 both still compile against a
+    3008 std), so this is not a correctness fix -- it is upkeep. Callers hand us
+    a source pinned to whatever they wrote it against; we move it to the current
+    std at upload time so recipes stay on supported semantics and nobody has to
+    remember to bump a literal.
+
+    Returns the source unchanged if it has no recognizable prelude (e.g. the
+    caller passed a fragment), so this is safe to run unconditionally.
+    """
+    if not _FS_PRELUDE_RE.search(source):
+        return source
+    out = _FS_PRELUDE_RE.sub(lambda m: f"{m.group(1)}{version}{m.group(3)}", source, count=1)
+    out = _FS_IMPORT_RE.sub(lambda m: f"{m.group(1)}{version}{m.group(3)}", out)
+    return out
 
 
 def _build_namespace(fs_element_id: str, source_microversion_id: str) -> str:

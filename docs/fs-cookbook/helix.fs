@@ -40,9 +40,17 @@
 //
 // VERIFIED: M10x1.5 thread on a ø10x40 mm shaft, render-confirmed
 // (run-1776408083 turn 58, 2026-04-17).
+// RE-VERIFIED 2026-07-13: compiles against live FS 3008 after the handSign fix
+// above. The previously-shipped if-expression form had stopped compiling.
+// See internal-thread.fs for the female counterpart and for the full list of
+// silent FS parse traps.
 
-FeatureScript 2931;
-import(path : "onshape/std/geometry.fs", version : "2931.0");
+// The version below is only a starting point: write_featurescript_feature
+// retargets the prelude + imports to the LIVE std-library version at upload
+// time. (Onshape does accept older preludes -- 2909 still compiles -- so this
+// is upkeep, not a fix. What actually broke this file was the syntax below.)
+FeatureScript 3008;
+import(path : "onshape/std/geometry.fs", version : "3008.0");
 
 annotation { "Feature Type Name" : "Helical Sweep" }
 export const helicalSweep = defineFeature(function(context is Context, id is Id, definition is map)
@@ -80,7 +88,14 @@ export const helicalSweep = defineFeature(function(context is Context, id is Id,
 
         // --- Sample the helix as N points and fit a spline through them.
         // theta sign: -2*pi for right-handed (advance +Z), +2*pi for left.
-        const handSign = if (definition.rightHanded) -1 else 1;
+        // NB: written as an if STATEMENT, not `const x = if (c) a else b;`.
+        // FeatureScript has no if-EXPRESSION -- that form does not parse, and
+        // the failure is silent: the Feature Studio compiles to an empty
+        // feature spec with no diagnostic from the API. This recipe carried
+        // the expression form until 2026-07-13.
+        var handSign = 1;
+        if (definition.rightHanded)
+            handSign = -1;
         const nPerTurn = 48;
         const nPts = floor(totalTurns * nPerTurn) + 1;
         var pts = [];

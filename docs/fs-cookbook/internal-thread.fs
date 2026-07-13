@@ -39,8 +39,12 @@
 //     FDM/SLA where a nominal thread binds. 0.2-0.4 mm is a sane starting
 //     point on a 0.4 mm nozzle; 0 for machined.
 //
-// TWO FS PARSE TRAPS (both cost a full bisect; the API surfaces NO diagnostic
-// for either -- the Feature Studio just compiles to an empty feature spec):
+// FS PARSE TRAPS. Each one makes the Feature Studio compile to an EMPTY feature
+// spec, and Onshape returns NO diagnostic whatsoever -- no line, no message.
+// Note what this is NOT: it is not the prelude version. Onshape happily accepts
+// an older `FeatureScript <N>;` (2909 and 2931 both compile against a 3008 std),
+// so an empty spec always means syntax, never drift. Do not go chasing the
+// version number like I did.
 //   - There is no if-EXPRESSION. `var s = if (c) a else b;` does not parse.
 //     Use an if/else STATEMENT. NB: helix.fs still carries this form, so it
 //     no longer compiles as written on the current std library.
