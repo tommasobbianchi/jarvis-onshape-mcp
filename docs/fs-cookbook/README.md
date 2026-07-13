@@ -13,6 +13,7 @@ here have all been verified end-to-end against the live Onshape API.
 | Recipe | When to use |
 |---|---|
 | [`helix.fs`](helix.fs) | Threads (internal/external), springs (compression/extension), augers, screw conveyors, helical ribs. Anything where a 2D profile sweeps along a helical path. Avoids the broken `opHelix` API in favor of `opFitSpline + opSweep`. |
+| [`internal-thread.fs`](internal-thread.fs) | Tapped/female threads in an existing hole. Takes radius + axis + depth straight off the picked bore face (or inner circle edge) — no manual diameter entry. Multi-start, ISO-60° or custom profile, print clearance. Builds on `helix.fs`; the one sign it flips is the cut direction (outward from the wall, not inward). |
 
 ## Adding a new recipe
 

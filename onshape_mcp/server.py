@@ -2307,7 +2307,10 @@ async def list_tools() -> list[Tool]:
                 "```\n"
                 "`parameters` is a list of `{id, type, value}` dicts to bind "
                 "precondition variables. type ∈ {quantity, string, boolean, real}. "
-                "For quantity, value is a unit-tagged string like \"25 mm\" or \"0.5 in\"."
+                "For quantity, value is a unit-tagged string like \"25 mm\" or \"0.5 in\". "
+                "For query, value is a deterministic entity ID (or list of them) from "
+                "list_entities -- this is how an FS feature picks a face/edge. "
+                "For enum, value is the enum constant name declared in the FS source."
             ),
             inputSchema={
                 "type": "object",
@@ -2335,7 +2338,11 @@ async def list_tools() -> list[Tool]:
                                 "id": {"type": "string"},
                                 "type": {
                                     "type": "string",
-                                    "enum": ["quantity", "string", "boolean", "real"],
+                                    "enum": ["quantity", "string", "boolean", "real", "query", "enum"],
+                                },
+                                "enumName": {
+                                    "type": "string",
+                                    "description": "Only for type=enum: the FS enum's declared name.",
                                 },
                                 "value": {},
                             },

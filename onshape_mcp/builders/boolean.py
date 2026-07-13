@@ -88,7 +88,7 @@ class BooleanBuilder:
                 "value": self.boolean_type.value,
                 "parameterId": "booleanOperationType",
                 "parameterName": "",
-                "libraryRelationType": "NONE",
+                "libraryRelationType": "DEFAULT",
             },
             {
                 "btType": "BTMParameterQueryList-148",
@@ -100,7 +100,7 @@ class BooleanBuilder:
                 ],
                 "parameterId": "tools",
                 "parameterName": "",
-                "libraryRelationType": "NONE",
+                "libraryRelationType": "DEFAULT",
             },
         ]
 
@@ -116,7 +116,7 @@ class BooleanBuilder:
                     ],
                     "parameterId": "targets",
                     "parameterName": "",
-                    "libraryRelationType": "NONE",
+                    "libraryRelationType": "DEFAULT",
                 }
             )
 

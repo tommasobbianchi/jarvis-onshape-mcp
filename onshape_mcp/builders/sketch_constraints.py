@@ -62,7 +62,7 @@ def _ref_param(parameter_id: str, entity_ref: str) -> Dict[str, Any]:
         "value": entity_ref,
         "parameterId": parameter_id,
         "parameterName": "",
-        "libraryRelationType": "NONE",
+        "libraryRelationType": "DEFAULT",
     }
 
 
@@ -80,7 +80,7 @@ def _quantity_param(parameter_id: str, expression: str) -> Dict[str, Any]:
         "expression": expression,
         "parameterId": parameter_id,
         "parameterName": "",
-        "libraryRelationType": "NONE",
+        "libraryRelationType": "DEFAULT",
     }
 
 
@@ -92,7 +92,7 @@ def _enum_param(parameter_id: str, enum_name: str, value: str) -> Dict[str, Any]
         "value": value,
         "parameterId": parameter_id,
         "parameterName": "",
-        "libraryRelationType": "NONE",
+        "libraryRelationType": "DEFAULT",
     }
 
 

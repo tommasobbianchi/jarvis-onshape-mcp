@@ -95,7 +95,7 @@ class FilletBuilder:
                         ],
                         "parameterId": "entities",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
+                        "libraryRelationType": "DEFAULT",
                     },
                     {
                         "btType": "BTMParameterQuantity-147",
@@ -105,7 +105,7 @@ class FilletBuilder:
                         "expression": radius_expression,
                         "parameterId": "radius",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
+                        "libraryRelationType": "DEFAULT",
                     },
                 ],
             },

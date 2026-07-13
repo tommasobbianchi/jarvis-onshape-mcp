@@ -191,6 +191,14 @@ class CustomFeatureManager:
         onshape_params = [
             _to_onshape_parameter(p) for p in (parameters or [])
         ]
+        # An enum declared inside the caller's Feature Studio is not resolvable
+        # from a bare name -- Onshape rejects it with "Parameter <x> ... does not
+        # match its feature spec". It has to carry the SAME namespace as the
+        # feature that owns it, so stamp it on here rather than making callers
+        # pass a value they'd have to reconstruct.
+        for p in onshape_params:
+            if p.get("btType") == "BTMParameterEnum-145" and not p.get("namespace"):
+                p["namespace"] = namespace
 
         payload = {
             "btType": "BTFeatureDefinitionCall-1406",
@@ -362,6 +370,8 @@ def _to_onshape_parameter(param: Dict[str, Any]) -> Dict[str, Any]:
     - string:   BTMParameterString-149
     - boolean:  BTMParameterBoolean-144
     - real:     BTMParameterQuantity-147 without units
+    - query:    BTMParameterQueryList-148; value = deterministic ID (or list)
+    - enum:     BTMParameterEnum-145; value = enum constant name
 
     Unknown types raise ValueError so bad inputs fail loudly.
     """
@@ -398,7 +408,50 @@ def _to_onshape_parameter(param: Dict[str, Any]) -> Dict[str, Any]:
             "value": float(value) if value is not None else 0.0,
             "expression": str(value) if value is not None else "0",
         }
+    if ptype == "integer":
+        # A precondition declared with isInteger(...) yields a spec with
+        # quantityType=INTEGER; a float-shaped BTMParameterQuantity-147 does
+        # not satisfy it.
+        return {
+            "btType": "BTMParameterQuantity-147",
+            "parameterId": pid,
+            "isInteger": True,
+            "value": int(value) if value is not None else 0,
+            "expression": str(int(value)) if value is not None else "0",
+        }
+    if ptype == "query":
+        # Geometry selection. `value` is a deterministic ID (from list_entities)
+        # or a list of them. Without this, any custom feature whose precondition
+        # takes `definition.x is Query` is unreachable through this tool -- which
+        # rules out the entire class of FS features that operate on picked faces
+        # or edges (threads on a bore, sweeps along a chosen edge, ...).
+        ids = value if isinstance(value, (list, tuple)) else [value]
+        ids = [str(i) for i in ids if i]
+        if not ids:
+            raise ValueError(f"query parameter {pid!r} needs at least one deterministic ID")
+        return {
+            "btType": "BTMParameterQueryList-148",
+            "parameterId": pid,
+            "queries": [
+                {
+                    "btType": "BTMIndividualQuery-138",
+                    "deterministicIds": ids,
+                }
+            ],
+        }
+    if ptype == "enum":
+        # `value` is the enum CONSTANT name as declared in the FS source
+        # (e.g. "FULL_FACE"). enumName defaults to the FS enum's own name,
+        # which callers pass as `enumName`; Onshape tolerates it being absent
+        # for custom-feature enums since the parameterId pins the type.
+        return {
+            "btType": "BTMParameterEnum-145",
+            "parameterId": pid,
+            "value": "" if value is None else str(value),
+            "enumName": str(param.get("enumName") or ""),
+            "namespace": "",
+        }
     raise ValueError(
         f"unsupported parameter type {ptype!r} for id={pid!r}; "
-        "use quantity | string | boolean | real"
+        "use quantity | string | boolean | real | integer | query | enum"
     )
