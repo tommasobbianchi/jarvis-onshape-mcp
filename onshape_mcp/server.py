@@ -26,6 +26,7 @@ from .builders.sketch import SketchBuilder, SketchPlane
 from .api.sketch_inspect import inspect_sketch as _inspect_sketch_feature, list_sketches as _list_sketches
 from .api.sketch_render import render_sketch_png as _render_sketch_png
 from .builders.extrude import ExtrudeBuilder, ExtrudeEndType, ExtrudeType
+from .builders.stepped_extrude import SteppedExtrudeBuilder
 from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
@@ -348,6 +349,95 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId", "depth"],
+            },
+        ),
+        Tool(
+            name="create_stepped_extrude",
+            description=(
+                "Create a stepped (counterbore/countersink-style) hole with multiple "
+                "diameters at a shared center — e.g. a wide clearance bore for a bolt "
+                "head plus a narrower bore for the shaft. Builds N sketches + N REMOVE "
+                "extrudes (one pair per step, largest radius first) as separate feature "
+                "calls; radii/depths need not be pre-sorted, this tool sorts them. "
+                "For a single-diameter hole use create_extrude with operationType=REMOVE "
+                "instead — this tool is specifically for MULTI-diameter stepped holes."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "namePrefix": {
+                        "type": "string",
+                        "description": "Prefix for each step's sketch/extrude feature name",
+                        "default": "Counterbore",
+                    },
+                    "center": {
+                        "type": "array",
+                        "items": {"type": ["number", "string"]},
+                        "description": "Center point [x, y] shared by every step. Bare numbers are mm; use \"0.5 in\" etc. for explicit units.",
+                        "minItems": 2,
+                        "maxItems": 2,
+                    },
+                    "radii": {
+                        "type": "array",
+                        "items": {"type": ["number", "string"]},
+                        "description": "Radius per step, any order (sorted largest-first internally). Bare numbers are mm.",
+                        "minItems": 2,
+                    },
+                    "depths": {
+                        "type": "array",
+                        "items": {"type": ["number", "string"]},
+                        "description": "Cumulative cut depth per step, paired by index with `radii` BEFORE sorting. Bare numbers are mm.",
+                        "minItems": 2,
+                    },
+                    "plane": {
+                        "type": "string",
+                        "enum": ["Front", "Top", "Right"],
+                        "description": "Sketch plane for every step's circle",
+                        "default": "Top",
+                    },
+                    "oppositeDirection": {
+                        "type": "boolean",
+                        "description": (
+                            "Cut direction for every step's extrude. Defaults to true "
+                            "because the typical case (sketching on a face and cutting "
+                            "into the material below) needs the REMOVE auto-flip that "
+                            "create_extrude applies automatically for picked faces — "
+                            "this tool always builds fresh sketches on a named plane, "
+                            "so that auto-flip doesn't apply and must be set explicitly. "
+                            "Set to false if the hole cuts the wrong way."
+                        ),
+                        "default": True,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "center", "radii", "depths"],
+            },
+        ),
+        Tool(
+            name="find_edges_by_feature",
+            description=(
+                "Find the deterministic edge IDs created by a specific feature (e.g. the "
+                "sidewall/bottom edges of a hole just cut by create_extrude or "
+                "create_stepped_extrude). Different axis from list_entities' geometric "
+                "filters (radius_range_mm etc.) — this queries topology PROVENANCE "
+                "(qCreatedBy), not geometry. Use right after creating a feature when you "
+                "need ITS edges specifically, e.g. to fillet only the rim of a hole you "
+                "just cut without re-scanning the whole part."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "featureId": {
+                        "type": "string",
+                        "description": "Feature ID whose created edges you want (the featureId returned by add_feature for that feature)",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureId"],
             },
         ),
         Tool(
@@ -2930,6 +3020,129 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         except Exception as e:
             logger.exception("Unexpected error creating extrude")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "create_stepped_extrude":
+        try:
+            plane_map = {"Front": SketchPlane.FRONT, "Top": SketchPlane.TOP, "Right": SketchPlane.RIGHT}
+            plane_name = arguments.get("plane", "Top")
+            plane_enum = plane_map.get(plane_name, SketchPlane.TOP)
+            plane_id = await partstudio_manager.get_plane_id(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name
+            )
+
+            builder = SteppedExtrudeBuilder(
+                name_prefix=arguments.get("namePrefix", "Counterbore"),
+                center=tuple(arguments["center"]),
+                radii=arguments["radii"],
+                depths=arguments["depths"],
+                plane=plane_enum,
+                plane_id=plane_id,
+            )
+            steps = builder.steps()
+            opposite_direction = arguments.get("oppositeDirection", True)
+
+            feature_ids = []
+            for step in steps:
+                sketch_result = await partstudio_manager.add_feature(
+                    arguments["documentId"],
+                    arguments["workspaceId"],
+                    arguments["elementId"],
+                    step.sketch.build(plane_id=plane_id),
+                )
+                sketch_feature_id = sketch_result.get("feature", {}).get("featureId") or sketch_result.get(
+                    "featureId", "unknown"
+                )
+                feature_ids.append(sketch_feature_id)
+
+                extrude = ExtrudeBuilder(
+                    name=f"{builder.name_prefix} {step.index + 1}",
+                    sketch_feature_id=sketch_feature_id,
+                    depth=step.depth,
+                    operation_type=ExtrudeType.REMOVE,
+                    opposite_direction=opposite_direction,
+                )
+                extrude_result = await partstudio_manager.add_feature(
+                    arguments["documentId"],
+                    arguments["workspaceId"],
+                    arguments["elementId"],
+                    extrude.build(),
+                )
+                extrude_feature_id = extrude_result.get("feature", {}).get("featureId") or extrude_result.get(
+                    "featureId", "unknown"
+                )
+                feature_ids.append(extrude_feature_id)
+
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Created stepped hole '{builder.name_prefix}' with {len(steps)} steps "
+                        f"(radii largest→smallest). Feature IDs: {', '.join(feature_ids)}"
+                    ),
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"API error creating stepped extrude: {e.response.status_code} - {e.response.text[:500]}"
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating stepped hole: API returned {e.response.status_code}. Check that the parameters are correct.",
+                )
+            ]
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Error creating stepped hole: {str(e)}")]
+        except Exception as e:
+            logger.exception("Unexpected error creating stepped extrude")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating stepped hole: {str(e)}\n\nPlease check the parameters and try again.",
+                )
+            ]
+
+    elif name == "find_edges_by_feature":
+        try:
+            result = await entity_manager.find_edges_by_feature(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["featureId"],
+            )
+            edge_ids = result["edge_ids"]
+            if not edge_ids:
+                return [
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"No edges found for feature '{arguments['featureId']}'. Either the "
+                            "feature created no edges, failed to regen, or the ID is wrong."
+                        ),
+                    )
+                ]
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Found {result['count']} edge(s) created by feature "
+                        f"'{arguments['featureId']}':\n" + "\n".join(f"  {e}" for e in edge_ids)
+                    ),
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"API error finding edges by feature: {e.response.status_code} - {e.response.text[:500]}"
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error finding edges: API returned {e.response.status_code}. Check the document/workspace/element/feature IDs.",
+                )
+            ]
+        except Exception as e:
+            logger.exception("Unexpected error finding edges by feature")
+            return [TextContent(type="text", text=f"Error finding edges: {str(e)}")]
 
     elif name == "create_thicken":
         try:

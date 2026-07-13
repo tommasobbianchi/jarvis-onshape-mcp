@@ -563,3 +563,56 @@ class EntityManager:
             "original_counts": original_counts,
             "filtered_counts": filtered_counts,
         }
+
+    async def find_edges_by_feature(
+        self, document_id: str, workspace_id: str, element_id: str, feature_id: str
+    ) -> Dict[str, Any]:
+        """Find deterministic edge IDs created by a specific feature.
+
+        Ported from clarsbyte/onshape-mcp's find_edges_by_feature. Fills a
+        genuine gap: list_entities() enumerates every edge in the Part
+        Studio with rich geometric filters (radius_range_mm, geometryType,
+        etc.) but has no "which edges came FROM feature X" query — that's
+        `qCreatedBy`, a different axis entirely (topology provenance, not
+        geometry). Handy right after create_extrude/create_hole/
+        create_stepped_extrude to grab the new edges for an immediate
+        follow-up fillet/chamfer without re-running list_entities and
+        eyeballing which ones are new.
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Part Studio element ID
+            feature_id: Feature ID whose created edges you want (the
+                featureId returned by add_feature() for that feature).
+
+        Returns:
+            Dict with `edge_ids` (list[str] of deterministic ids) and
+            `count`. Empty list if the feature created no edges (e.g. it
+            failed to regen) or `feature_id` doesn't exist.
+        """
+        script = f"""
+        function(context is Context, queries) {{
+            const created = qCreatedBy(makeId("{feature_id}"), EntityType.EDGE);
+            const edges = evaluateQuery(context, created);
+            var edgeIds = [];
+            for (var edge in edges) {{
+                try {{
+                    edgeIds = append(edgeIds, toString(qDeterministicIdQuery(edge)));
+                }} catch {{}}
+            }}
+            return edgeIds;
+        }}
+        """
+        path = (
+            f"/api/v8/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/featurescript"
+        )
+        result = await self.client.post(path, data={"script": script})
+
+        edge_ids: List[str] = []
+        if isinstance(result, dict):
+            value = result.get("result", {}).get("value")
+            if isinstance(value, list):
+                edge_ids = [v for v in value if isinstance(v, str)]
+
+        return {"edge_ids": edge_ids, "count": len(edge_ids)}
