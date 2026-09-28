@@ -37,3 +37,20 @@ Fonte della topologia su nativedev: `~/MASTER_CONTEXT.md` (sezione "RETE TAILSCA
   `freecad-claude-bridge.service`, setup `setup_freecad_mcp.sh`).
 - Check rapido da nativedev:
   `python3 -c "import xmlrpc.client as x;print(x.ServerProxy('http://100.103.234.2:9875').ping())"`
+
+### Gotcha noti (FreeCAD snap sul behemoth)
+
+- FreeCAD snap vede `~` = `~/snap/freecad/<rev>/` e ha `/tmp` privato: i file salvati da
+  `execute_code` con `expanduser("~/...")` finiscono in `~/snap/freecad/<rev>/...`.
+  Usare path assoluti sotto `/home/tommaso/snap/freecad/common/` oppure copiarli dopo.
+- **Non usare `ActiveView.saveImage()` via RPC**: blocca il thread GUI e l'RPC smette di
+  rispondere (serve riavviare FreeCAD). Per le anteprime renderizzare gli STL su nativedev
+  (`uv run --no-project --with matplotlib --with numpy-stl ...`).
+- Avvio FreeCAD da nativedev: `ssh behemoth 'systemd-run --user --unit=freecad-gui --collect /snap/bin/freecad [file.FCStd]'`
+  (riavvio: `systemctl --user stop freecad-gui`).
+
+### Lavori in corso
+
+- Clip snap-fit per bilanciere Ø25 (riferimento centro + prese panca):
+  script parametrico `~/projects/cad-3d/clip_bilanciere/clip.py` (su behemoth e nativedev),
+  output `Clip_Bilanciere.FCStd`, `Clip_Centro.{stl,step}`, `Clip_Mano.{stl,step}`.
