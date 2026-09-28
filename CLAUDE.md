@@ -53,4 +53,6 @@ Fonte della topologia su nativedev: `~/MASTER_CONTEXT.md` (sezione "RETE TAILSCA
 
 - Clip snap-fit per bilanciere Ø25 (riferimento centro + prese panca):
   script parametrico `~/projects/cad-3d/clip_bilanciere/clip.py` (su behemoth e nativedev),
-  output `Clip_Bilanciere.FCStd`, `Clip_Centro.{stl,step}`, `Clip_Mano.{stl,step}`.
+  output (scritto da FreeCAD in `~/snap/freecad/common/clip_bilanciere/`, poi copiato)
+  `Clip_Bilanciere.FCStd`, `Clip_Centro.{stl,step}` (inciso PL), `Clip_Mano.{stl,step}` (inciso SM).
+  Alette pentagonali raccordate R1.5, incisione 0.6 mm sulla faccia superiore dell'aletta.
